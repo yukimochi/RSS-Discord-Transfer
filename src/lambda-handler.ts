@@ -67,31 +67,84 @@ export class RSSDiscordLambda {
         const parseResult = await this.feedParser.parseFeed(feedUrl);
         const items = parseResult.items;
 
-        const newItems = items.filter(
-          item => item.publishedAt > new Date(feedState.lastCheckedAt)
-        );
+        // Check if this is the first time processing this feed
+        const isFirstTime = !currentState.feeds[feedUrl];
 
-        if (newItems.length > 0) {
-          // Sort items by publication date
-          newItems.sort((a, b) => a.publishedAt.getTime() - b.publishedAt.getTime());
-
-          await this.discordService.sendFeedItems(newItems);
-
-          const latestItem = newItems[newItems.length - 1];
+        let newItems: typeof items = [];
+        
+        if (isFirstTime && items.length > 0) {
+          // First time: send only the latest item, then mark it as processed
+          items.sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime());
+          const latestItem = items[0];
+          
           if (latestItem) {
-            currentState.feeds[feedUrl] = {
-              lastCheckedAt: latestItem.publishedAt.toISOString(),
-              lastItemGuid: latestItem.guid,
-            };
-            stateChanged = true;
+            console.log(`First time processing feed ${feedUrl}, sending latest item: ${latestItem.title}`);
+            
+            // Send the latest item to Discord
+            newItems = [latestItem];
+            try {
+              await this.discordService.sendFeedItems(newItems);
+              console.log(`Successfully sent ${newItems.length} items to Discord for feed ${feedUrl}`);
+              
+              // Mark it as processed
+              currentState.feeds[feedUrl] = {
+                lastCheckedAt: latestItem.publishedAt.toISOString(),
+                lastItemGuid: latestItem.guid,
+              };
+              stateChanged = true;
+            } catch (discordError) {
+              const err = discordError instanceof Error ? discordError : new Error(String(discordError));
+              console.error(`Failed to send items to Discord for feed ${feedUrl}:`, err);
+              await this.sendErrorNotification({
+                type: 'Discord Notification',
+                message: `Failed to send items to Discord: ${err.message}`,
+                severity: 'medium',
+                feedUrl: feedUrl,
+              });
+              // Don't update the state if Discord sending failed, so we can retry these items next time
+            }
+          }
+        } else {
+          // Normal processing: send items newer than last check
+          newItems = items.filter(
+            item => item.publishedAt > new Date(feedState.lastCheckedAt)
+          );
+
+          if (newItems.length > 0) {
+            // Sort items by publication date
+            newItems.sort((a, b) => a.publishedAt.getTime() - b.publishedAt.getTime());
+
+            try {
+              await this.discordService.sendFeedItems(newItems);
+              console.log(`Successfully sent ${newItems.length} items to Discord for feed ${feedUrl}`);
+              
+              const latestItem = newItems[newItems.length - 1];
+              if (latestItem) {
+                currentState.feeds[feedUrl] = {
+                  lastCheckedAt: latestItem.publishedAt.toISOString(),
+                  lastItemGuid: latestItem.guid,
+                };
+                stateChanged = true;
+              }
+            } catch (discordError) {
+              const err = discordError instanceof Error ? discordError : new Error(String(discordError));
+              console.error(`Failed to send items to Discord for feed ${feedUrl}:`, err);
+              await this.sendErrorNotification({
+                type: 'Discord Notification',
+                message: `Failed to send items to Discord: ${err.message}`,
+                severity: 'medium',
+                feedUrl: feedUrl,
+              });
+              // Don't update the state if Discord sending failed, so we can retry these items next time
+            }
           }
         }
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        console.error(`Failed to process feed ${feedUrl}:`, err);
+        console.error(`Failed to fetch or parse feed ${feedUrl}:`, err);
         await this.sendErrorNotification({
           type: 'Feed Processing',
-          message: `Failed to process feed: ${err.message}`,
+          message: `Failed to fetch or parse feed: ${err.message}`,
           severity: 'medium',
           feedUrl: feedUrl,
         });

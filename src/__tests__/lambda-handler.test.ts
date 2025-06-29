@@ -157,7 +157,7 @@ describe('RSSDiscordLambda', () => {
     expect(errorDiscordService.sendErrorNotification).toHaveBeenCalledTimes(2);
     expect(errorDiscordService.sendErrorNotification).toHaveBeenCalledWith({
         type: 'Feed Processing',
-        message: `Failed to process feed: ${parsingError.message}`,
+        message: `Failed to fetch or parse feed: ${parsingError.message}`,
         severity: 'medium',
         feedUrl: feedUrl1,
     });
@@ -200,8 +200,8 @@ describe('RSSDiscordLambda', () => {
     await lambda.processFeeds();
 
     expect(errorDiscordService.sendErrorNotification).toHaveBeenCalledWith({
-        type: 'Feed Processing',
-        message: `Failed to process feed: ${discordError.message}`,
+        type: 'Discord Notification',
+        message: `Failed to send items to Discord: ${discordError.message}`,
         severity: 'medium',
         feedUrl: feedUrl1,
     });
@@ -210,5 +210,68 @@ describe('RSSDiscordLambda', () => {
     const savedState = stateManager.saveState.mock.calls[0]?.[0];
     expect(savedState).toBeDefined();
     expect(savedState?.feeds?.[feedUrl1]?.lastItemGuid).toBe('guid1');
+  });
+
+  test('should send only latest item on first execution and mark it as processed', async () => {
+    // Setup: empty state (first run)
+    const emptyState: AppState = {
+      lastCheckedAt: '1970-01-01T00:00:00.000Z',
+      feeds: {},
+    };
+    stateManager.loadState.mockResolvedValue(emptyState);
+
+    // Setup: feed has multiple items
+    const multipleItems: FeedItem[] = [
+      {
+        id: 'id1',
+        title: 'Older Post',
+        link: 'http://example.com/post1',
+        publishedAt: new Date(olderDate),
+        guid: 'guid1',
+        author: 'Author',
+        feedUrl: feedUrl1,
+      },
+      {
+        id: 'id2',
+        title: 'Latest Post',
+        link: 'http://example.com/post2',
+        publishedAt: new Date(newerDate),
+        guid: 'guid2',
+        author: 'Author',
+        feedUrl: feedUrl1,
+      },
+    ];
+
+    feedParser.parseFeed.mockImplementation(async (url: string) => {
+      if (url === feedUrl1) {
+        return {
+          type: FeedType.RSS,
+          items: multipleItems,
+          feedInfo: { title: 'Feed 1', link: url },
+        };
+      }
+      return {
+        type: FeedType.RSS,
+        items: [],
+        feedInfo: { title: 'Feed 2', link: url },
+      };
+    });
+
+    await lambda.processFeeds();
+
+    // Verify only the latest item was sent to Discord on first run
+    expect(discordService.sendFeedItems).toHaveBeenCalledTimes(1);
+    const sentItems = discordService.sendFeedItems.mock.calls[0]?.[0];
+    expect(sentItems).toBeDefined();
+    expect(sentItems).toHaveLength(1);
+    expect(sentItems?.[0]?.guid).toBe('guid2'); // Latest item
+    expect(sentItems?.[0]?.title).toBe('Latest Post');
+
+    // Verify state was saved with the latest item marked as processed
+    expect(stateManager.saveState).toHaveBeenCalledTimes(1);
+    const savedState = stateManager.saveState.mock.calls[0]?.[0];
+    expect(savedState).toBeDefined();
+    expect(savedState?.feeds?.[feedUrl1]?.lastCheckedAt).toBe(newerDate);
+    expect(savedState?.feeds?.[feedUrl1]?.lastItemGuid).toBe('guid2');
   });
 });

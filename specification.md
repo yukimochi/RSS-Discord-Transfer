@@ -24,15 +24,15 @@
 ### 記事管理
 - 新着記事の判別方法: 発行日時（pubDate）による判別
 - 既読管理: 前回のチェック時刻を永続化し、それより新しい記事のみを処理
-- 初回実行時の動作: 最新の記事のみを処理し、それ以前の記事は無視
+- 初回実行時の動作: 最新の記事1件のみを処理し、それ以前の記事は無視
 - 1回の実行で処理する最大記事数: 10件（負荷軽減のため）
 
 ### Discord連携
 - Discord連携方法: Webhook
-- 投稿フォーマット: シンプルテキスト（タイトル + URL）
+- 投稿フォーマット: Embed形式（titleフィールドに記事タイトル、urlフィールドにリンク、descriptionにID・発行日時）
 - 添付情報: 発行日時
-- Webhookリクエストタイムアウト: 2秒
-- エラー通知フォーマット: エラータイプ、発生時刻、エラー詳細を含むテキスト形式
+- Webhookリクエストタイムアウト: 10秒
+- エラー通知フォーマット: エラータイプ、発生時刻、エラー詳細を含むEmbed形式
 
 ## 環境変数定義
 - RSS_FEED_URLS: RSSフィードのURL（カンマ区切り）
@@ -107,9 +107,12 @@
   </entry>
 ```
 
-**Discord出力例:**
+**Discord出力例 (Embed形式):**
 ```
-[Certificate] Issued by Let's Encrypt Authority X3; Valid from 2017-11-25 to 2018-02-23; Serial number 032745b481aa15fca0c5b4285663dcba3431
-https://crt.sh/?id=263803911
+Title: [Certificate] Issued by Let's Encrypt Authority X3; Valid from 2017-11-25 to 2018-02-23; Serial number 032745b481aa15fca0c5b4285663dcba3431
+URL: https://crt.sh/?id=263803911 (クリック可能なリンク)
+
+Description:
+ID: https://crt.sh/?id=263803911#q;yukimochi.jp
 投稿日時: 2017-11-25 02:46:36 UTC
 ```

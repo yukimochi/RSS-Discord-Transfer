@@ -5,10 +5,11 @@ AWS Lambdaを使用してRSSフィードの新着記事をDiscordに自動投稿
 ## 機能
 
 - 複数のRSSフィードを監視
-- 新着記事のみをDiscordに投稿
+- 新着記事のみをDiscordに投稿  
 - S3による状態管理
 - エラー通知機能
 - TypeScript + Node.js 18.x
+- RSS取得: 20秒タイムアウト、Discord Webhook: 10秒タイムアウト
 
 ## ローカルテスト
 

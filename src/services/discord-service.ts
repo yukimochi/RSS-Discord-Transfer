@@ -60,6 +60,7 @@ export class DiscordService {
       headers: {
         'Content-Type': 'application/json',
       },
+      timeout: 10000, // 10 seconds for Discord webhook requests
     });
   }
 
@@ -90,10 +91,20 @@ export class DiscordService {
   }
 
   private createEmbedFromFeedItem(item: FeedItem): DiscordEmbed {
+    // Create description with ID and timestamp as specified in the requirements
+    let description = '';
+    if (item.id && item.id !== item.guid) {
+      description += `ID: ${item.id}`;
+    }
+    if (this.messageOptions.includeTimestamp) {
+      if (description) description += '\n';
+      description += `投稿日時: ${item.publishedAt.toISOString().replace('T', ' ').replace('Z', ' UTC')}`;
+    }
+
     const embed: DiscordEmbed = {
       title: item.title,
       url: item.link,
-      description: item.content,
+      description: description || undefined, // Only include description if there's content
       timestamp: this.messageOptions.includeTimestamp ? item.publishedAt.toISOString() : undefined,
       color: 0x00ff00, // Green
       author: item.author ? { name: item.author } : undefined,

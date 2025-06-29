@@ -11,7 +11,7 @@ export class HttpClient {
 
   constructor(options: Partial<HttpRequestOptions> = {}) {
     this.defaultOptions = {
-      timeout: 3000, // 3 seconds as per specification
+      timeout: 20000, // 20 seconds for RSS feed requests
       retries: 1, // 1 retry (total 2 attempts) as per specification
       ...options,
     };
@@ -38,7 +38,7 @@ export class HttpClient {
         
         // Don't wait after the last attempt
         if (attempt < requestOptions.retries!) {
-          const delayMs = process.env.NODE_ENV === 'test' ? 10 : 1000; // Shorter delay in test
+          const delayMs = process.env.NODE_ENV === 'test' ? 10 : 2000; // 2 seconds delay between retries
           await this.delay(delayMs);
         }
       }
@@ -67,8 +67,6 @@ export class HttpClient {
         },
         timeout: options.timeout!,
       };
-
-      console.log(requestOptions);
 
       const request = client.request(requestOptions, (response) => {
         const chunks: Buffer[] = [];
