@@ -1,6 +1,11 @@
 # Created by https://www.toptal.com/developers/gitignore/api/visualstudiocode,node
 # Edit at https://www.toptal.com/developers/gitignore?templates=visualstudiocode,node
 
+# Deployment files
+rss-discord-transfer.zip
+deployment/
+.env
+
 ### Node ###
 # Logs
 logs

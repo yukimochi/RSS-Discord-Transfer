@@ -68,6 +68,8 @@ export class HttpClient {
         timeout: options.timeout!,
       };
 
+      console.log(requestOptions);
+
       const request = client.request(requestOptions, (response) => {
         const chunks: Buffer[] = [];
         

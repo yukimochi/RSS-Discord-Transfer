@@ -8,13 +8,16 @@
     "build:watch": "tsc --watch",
     "test": "jest",
     "test:watch": "jest --watch",
+    "test:local": "node scripts/test-local.js",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "format": "prettier --write src/**/*.ts",
     "clean": "rimraf dist",
     "prebuild": "npm run clean",
     "package": "npm run build && npm run package:zip",
-    "package:zip": "cd dist && zip -r ../rss-discord-transfer.zip ."
+    "package:zip": "cd dist && zip -r ../rss-discord-transfer.zip .",
+    "package:win": "npm run build && npm run package:zip:win",
+    "package:zip:win": "powershell -Command \"Compress-Archive -Path dist/* -DestinationPath rss-discord-transfer.zip -Force\""
   },
   "keywords": [
     "aws-lambda",
@@ -26,13 +29,13 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "@aws-sdk/util-stream-node": "^3.370.0",
     "@types/aws-lambda": "^8.10.119",
     "@types/jest": "^29.5.3",
     "@types/nock": "^10.0.3",
     "@types/node": "^20.4.5",
     "@typescript-eslint/eslint-plugin": "^6.2.0",
     "@typescript-eslint/parser": "^6.2.0",
+    "aws-sdk-client-mock": "^4.1.0",
     "eslint": "^8.45.0",
     "eslint-config-prettier": "^8.8.0",
     "eslint-plugin-prettier": "^5.0.0",
@@ -45,7 +48,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.377.0",
-    "aws-sdk-client-mock": "^4.1.0",
+    "@aws-sdk/util-stream-node": "^3.370.0",
     "fast-xml-parser": "^4.2.7"
   },
   "engines": {
