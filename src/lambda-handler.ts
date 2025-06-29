@@ -120,6 +120,12 @@ export class RSSDiscordLambda {
             // Sort items by publication date
             newItems.sort((a, b) => a.publishedAt.getTime() - b.publishedAt.getTime());
 
+            // Limit to maximum 10 items per execution (as per specification)
+            if (newItems.length > 10) {
+              console.log(`Found ${newItems.length} new items for feed ${feedUrl}, limiting to 10 items as per specification`);
+              newItems = newItems.slice(0, 10);
+            }
+
             try {
               await this.discordService.sendFeedItems(newItems);
               console.log(`Successfully sent ${newItems.length} items to Discord for feed ${feedUrl}`);

@@ -318,4 +318,164 @@ describe('RSSDiscordLambda', () => {
     // Clean up environment variable
     delete process.env.SUPPRESS_FEED_ERROR_NOTIFICATIONS;
   });
+
+  it('should limit processing to maximum 10 items when more items are available', async () => {
+    // Create 15 feed items to test the 10-item limit
+    const manyFeedItems: FeedItem[] = Array.from({ length: 15 }, (_, index) => ({
+      title: `Post ${index + 1}`,
+      link: `http://example.com/post${index + 1}`,
+      publishedAt: new Date(new Date(newerDate).getTime() + index * 60000), // Each item 1 minute apart
+      guid: `guid${index + 1}`,
+      id: `id${index + 1}`,
+      feedUrl: feedUrl1,
+      author: 'Author',
+      description: `Description ${index + 1}`,
+    }));
+
+    const parseResult: FeedParseResult = {
+      type: FeedType.RSS,
+      items: manyFeedItems,
+      feedInfo: {
+        title: 'Test Feed',
+        description: 'Test Description',
+        link: 'http://example.com',
+      },
+    };
+
+    // Mock state loading to succeed
+    stateManager.loadState.mockResolvedValue(JSON.parse(JSON.stringify(initialState)));
+    
+    // Mock feed parsing to return 15 items
+    feedParser.parseFeed.mockResolvedValue(parseResult);
+    
+    // Mock Discord service methods
+    discordService.sendFeedItems.mockResolvedValue();
+    
+    // Mock state saving to succeed
+    stateManager.saveState.mockResolvedValue();
+
+    await lambda.processFeeds();
+
+    // Verify that only 10 items (not 15) were sent to Discord
+    expect(discordService.sendFeedItems).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'Post 1' }),
+        expect.objectContaining({ title: 'Post 10' }),
+      ])
+    );
+    
+    // Verify the call was made with exactly 10 items
+    const sentItems = discordService.sendFeedItems.mock.calls[0][0];
+    expect(sentItems).toHaveLength(10);
+    
+    // Verify that the items are sorted by publication date (oldest first)
+    expect(sentItems[0].title).toBe('Post 1');
+    expect(sentItems[9].title).toBe('Post 10');
+    
+    // Verify state was updated with the 10th item (not the 15th)
+    expect(stateManager.saveState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feeds: expect.objectContaining({
+          [feedUrl1]: expect.objectContaining({
+            lastCheckedAt: manyFeedItems[9].publishedAt.toISOString(), // 10th item
+            lastItemGuid: 'guid10',
+          }),
+        }),
+      })
+    );
+  });
+
+  it('should process all items when count is less than 10', async () => {
+    // Create only 5 feed items
+    const fewFeedItems: FeedItem[] = Array.from({ length: 5 }, (_, index) => ({
+      title: `Post ${index + 1}`,
+      link: `http://example.com/post${index + 1}`,
+      publishedAt: new Date(new Date(newerDate).getTime() + index * 60000),
+      guid: `guid${index + 1}`,
+      id: `id${index + 1}`,
+      feedUrl: feedUrl1,
+      author: 'Author',
+      description: `Description ${index + 1}`,
+    }));
+
+    const parseResult: FeedParseResult = {
+      type: FeedType.RSS,
+      items: fewFeedItems,
+      feedInfo: {
+        title: 'Test Feed',
+        description: 'Test Description',
+        link: 'http://example.com',
+      },
+    };
+
+    // Mock state loading to succeed
+    stateManager.loadState.mockResolvedValue(JSON.parse(JSON.stringify(initialState)));
+    
+    // Mock feed parsing to return 5 items
+    feedParser.parseFeed.mockResolvedValue(parseResult);
+    
+    // Mock Discord service methods
+    discordService.sendFeedItems.mockResolvedValue();
+    
+    // Mock state saving to succeed
+    stateManager.saveState.mockResolvedValue();
+
+    await lambda.processFeeds();
+
+    // Verify that all 5 items were sent to Discord
+    expect(discordService.sendFeedItems).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'Post 1' }),
+        expect.objectContaining({ title: 'Post 5' }),
+      ])
+    );
+    
+    // Verify the call was made with exactly 5 items
+    const sentItems = discordService.sendFeedItems.mock.calls[0][0];
+    expect(sentItems).toHaveLength(5);
+  });
+
+  it('should handle exactly 10 items without limiting', async () => {
+    // Create exactly 10 feed items
+    const exactlyTenItems: FeedItem[] = Array.from({ length: 10 }, (_, index) => ({
+      title: `Post ${index + 1}`,
+      link: `http://example.com/post${index + 1}`,
+      publishedAt: new Date(new Date(newerDate).getTime() + index * 60000),
+      guid: `guid${index + 1}`,
+      id: `id${index + 1}`,
+      feedUrl: feedUrl1,
+      author: 'Author',
+      description: `Description ${index + 1}`,
+    }));
+
+    const parseResult: FeedParseResult = {
+      type: FeedType.RSS,
+      items: exactlyTenItems,
+      feedInfo: {
+        title: 'Test Feed',
+        description: 'Test Description',
+        link: 'http://example.com',
+      },
+    };
+
+    // Mock state loading to succeed
+    stateManager.loadState.mockResolvedValue(JSON.parse(JSON.stringify(initialState)));
+    
+    // Mock feed parsing to return 10 items
+    feedParser.parseFeed.mockResolvedValue(parseResult);
+    
+    // Mock Discord service methods
+    discordService.sendFeedItems.mockResolvedValue();
+    
+    // Mock state saving to succeed
+    stateManager.saveState.mockResolvedValue();
+
+    await lambda.processFeeds();
+
+    // Verify that all 10 items were sent to Discord
+    const sentItems = discordService.sendFeedItems.mock.calls[0][0];
+    expect(sentItems).toHaveLength(10);
+    expect(sentItems[0].title).toBe('Post 1');
+    expect(sentItems[9].title).toBe('Post 10');
+  });
 });

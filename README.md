@@ -2,6 +2,12 @@
 
 AWS Lambdaを使用してRSSフィードの新着記事をDiscordに自動投稿するシステムです。
 
+## 📚 ドキュメント
+
+- **[Agent向けドキュメント](./docs/agent/)** - AI Agent向けの開発指示と仕様書
+- **[仕様書](./docs/agent/specification.md)** - 詳細な機能要件と技術要件
+- **[実装計画](./docs/agent/implementation-plan.md)** - 開発タスクと進捗状況
+
 ## 機能
 
 - 複数のRSSフィードを監視
