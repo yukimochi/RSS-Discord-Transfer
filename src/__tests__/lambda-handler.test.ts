@@ -274,4 +274,48 @@ describe('RSSDiscordLambda', () => {
     expect(savedState?.feeds?.[feedUrl1]?.lastCheckedAt).toBe(newerDate);
     expect(savedState?.feeds?.[feedUrl1]?.lastItemGuid).toBe('guid2');
   });
+
+  it('should suppress feed error notifications when SUPPRESS_FEED_ERROR_NOTIFICATIONS is true', async () => {
+    // Set environment variable to suppress feed error notifications
+    process.env.SUPPRESS_FEED_ERROR_NOTIFICATIONS = 'true';
+
+    // Mock state loading to succeed
+    stateManager.loadState.mockResolvedValue(JSON.parse(JSON.stringify(initialState)));
+    
+    // Mock feed parsing to fail
+    feedParser.parseFeed.mockRejectedValue(new Error('Network error'));
+
+    await lambda.processFeeds();
+
+    // Verify error notification was not sent
+    expect(errorDiscordService.sendErrorNotification).not.toHaveBeenCalled();
+    expect(discordService.sendErrorNotification).not.toHaveBeenCalled();
+
+    // Clean up environment variable
+    delete process.env.SUPPRESS_FEED_ERROR_NOTIFICATIONS;
+  });
+
+  it('should send feed error notifications when SUPPRESS_FEED_ERROR_NOTIFICATIONS is false or not set', async () => {
+    // Ensure environment variable is not set to true
+    process.env.SUPPRESS_FEED_ERROR_NOTIFICATIONS = 'false';
+
+    // Mock state loading to succeed
+    stateManager.loadState.mockResolvedValue(JSON.parse(JSON.stringify(initialState)));
+    
+    // Mock feed parsing to fail
+    feedParser.parseFeed.mockRejectedValue(new Error('Network error'));
+
+    await lambda.processFeeds();
+
+    // Verify error notification was sent
+    expect(errorDiscordService.sendErrorNotification).toHaveBeenCalledWith({
+      type: 'Feed Processing',
+      message: 'Failed to fetch or parse feed: Network error',
+      severity: 'medium',
+      feedUrl: feedUrl1,
+    });
+
+    // Clean up environment variable
+    delete process.env.SUPPRESS_FEED_ERROR_NOTIFICATIONS;
+  });
 });

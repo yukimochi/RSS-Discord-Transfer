@@ -100,6 +100,7 @@ scripts\build.bat
 | `S3_BUCKET_NAME` | ✓ | 状態管理用S3バケット名 |
 | `S3_STATE_KEY` | | 状態ファイルのS3キー（デフォルト: rss-discord-state.json） |
 | `AWS_REGION` | | AWSリージョン（デフォルト: us-east-1） |
+| `SUPPRESS_FEED_ERROR_NOTIFICATIONS` | | RSS取得失敗時のDiscord通知を抑制（true/false、デフォルト: false） |
 
 ## トラブルシューティング
 

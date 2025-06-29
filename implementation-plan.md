@@ -97,8 +97,11 @@
   - ネットワークエラー処理
   - パースエラー処理
   - S3アクセスエラー処理
+  - Discord Webhookでのエラー通知
+  - エラー内容の具体化（HTTPステータス別ガイダンス）
+  - RSS取得失敗通知の抑制オプション（SUPPRESS_FEED_ERROR_NOTIFICATIONS）
 
-- [ ] **4.2** CloudWatch Logsの活用
+- [x] **4.2** CloudWatch Logsの活用
   - TypeScript構造化ログの実装
   - エラーレベルの分類（TypeScript enum）
   - デバッグ情報の出力

@@ -40,6 +40,7 @@
 - ERROR_WEBHOOK_URL: エラー通知用Discord WebhookのURL（省略可、省略時は通常のWebhookを使用）
 - S3_BUCKET_NAME: 状態保存用S3バケット名
 - S3_STATE_KEY: 状態ファイルのキー名（デフォルト: 'rss-discord-state.json'）
+- SUPPRESS_FEED_ERROR_NOTIFICATIONS: RSS取得/解析失敗時のDiscord通知を抑制するかどうか（true/false、デフォルト: false）
 
 ## 技術要件
 
@@ -85,8 +86,11 @@
 
 ### エラー処理戦略
 - ネットワークエラー: 1回再試行後、続行不可能な場合はエラーを通知
-- パースエラー: ログに記録し、Discord通知後、他のフィードの処理を継続
+- パースエラー: ログに記録し、SUPPRESS_FEED_ERROR_NOTIFICATIONSが有効でなければDiscord通知後、他のフィードの処理を継続
 - S3アクセスエラー: 重大エラーとして処理を中断し通知
+
+**エラー通知抑制オプション:**
+`SUPPRESS_FEED_ERROR_NOTIFICATIONS=true` を設定することで、RSS取得/解析失敗時のDiscord通知を抑制できます。これにより、一時的なフィード障害によるノイズを減らすことができます。状態管理やDiscord送信失敗等の重要なエラーは引き続き通知されます。
 
 ### テスト戦略
 1. モック化したRSSフィードを用いた単体テスト

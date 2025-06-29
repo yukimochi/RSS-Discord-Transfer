@@ -31,6 +31,12 @@ export class RSSDiscordLambda {
   }
 
   private async sendErrorNotification(errorInfo: ErrorInfo): Promise<void> {
+    // Check if feed error notifications should be suppressed
+    if (errorInfo.type === 'Feed Processing' && process.env.SUPPRESS_FEED_ERROR_NOTIFICATIONS === 'true') {
+      console.log('Feed error notification suppressed due to SUPPRESS_FEED_ERROR_NOTIFICATIONS=true');
+      return;
+    }
+
     try {
       const service = this.errorDiscordService || this.discordService;
       await service.sendErrorNotification(errorInfo);
