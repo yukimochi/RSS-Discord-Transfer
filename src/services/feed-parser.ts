@@ -9,8 +9,8 @@ export class FeedParser {
   private readonly httpClient: HttpClient;
   private readonly xmlParser: XMLParser;
 
-  constructor() {
-    this.httpClient = new HttpClient();
+  constructor(httpClient: HttpClient) {
+    this.httpClient = httpClient;
     this.xmlParser = new XMLParser({
       ignoreAttributes: false,
       attributeNamePrefix: '@_',
@@ -148,6 +148,7 @@ export class FeedParser {
     const pubDate = this.parseDate(this.extractText(item.pubDate));
 
     if (!title || !link || !pubDate) {
+      console.warn('Skipping RSS item due to missing required fields (title, link, or pubDate)', { item });
       return null;
     }
 
@@ -170,6 +171,7 @@ export class FeedParser {
     const published = this.parseDate(this.extractText(entry.published));
 
     if (!title || !link || !published) {
+      console.warn('Skipping Atom entry due to missing required fields (title, link, or published)', { entry });
       return null;
     }
 

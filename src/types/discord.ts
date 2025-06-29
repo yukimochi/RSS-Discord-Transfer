@@ -1,56 +1,63 @@
 /**
+ * Discord embed object for rich message formatting
+ */
+export interface DiscordEmbed {
+  title?: string;
+  description?: string;
+  url?: string;
+  timestamp?: string;
+  color?: number;
+  footer?: {
+    text: string;
+    icon_url?: string;
+  };
+  thumbnail?: {
+    url: string;
+  };
+  author?: {
+    name: string;
+    url?: string;
+    icon_url?: string;
+  };
+  fields?: {
+    name: string;
+    value: string;
+    inline?: boolean;
+  }[];
+}
+
+/**
  * Discord webhook payload structure
  */
 export interface DiscordWebhookPayload {
-  readonly content: string;
-  readonly username?: string;
-  readonly avatar_url?: string;
+  content?: string;
+  username?: string;
+  avatar_url?: string;
+  embeds?: DiscordEmbed[];
 }
 
 /**
  * Discord message formatting options
  */
 export interface DiscordMessageOptions {
-  readonly includeTimestamp: boolean;
-  readonly maxContentLength: number;
-}
-
-/**
- * Error severity levels
- */
-export enum ErrorSeverity {
-  LOW = 'low',
-  MEDIUM = 'medium',
-  HIGH = 'high',
-  CRITICAL = 'critical',
+  username?: string;
+  avatar_url?: string;
+  includeTimestamp: boolean;
+  maxContentLength: number;
 }
 
 /**
  * Error information for Discord notifications
  */
 export interface ErrorInfo {
-  readonly type: string;
-  readonly message: string;
-  readonly severity: ErrorSeverity;
-  readonly timestamp: Date;
-  readonly feedUrl?: string;
-  readonly details?: Record<string, unknown>;
+  type: string;
+  message: string;
+  severity: ErrorSeverity;
+  feedUrl?: string;
+  details?: Record<string, unknown>;
 }
 
 /**
- * HTTP response interface
+ * Error severity levels
  */
-export interface HttpResponse {
-  readonly statusCode: number;
-  readonly data: string;
-  readonly headers: Record<string, string>;
-}
-
-/**
- * HTTP request options
- */
-export interface HttpRequestOptions {
-  readonly timeout: number;
-  readonly retries: number;
-  readonly headers?: Record<string, string>;
-}
+export type ErrorSeverity = 'high' | 'medium' | 'low';

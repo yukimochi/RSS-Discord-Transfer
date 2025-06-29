@@ -51,6 +51,9 @@ export interface FeedItem {
   readonly description?: string;
   readonly id: string;
   readonly feedUrl: string;
+  readonly content?: string;
+  readonly author?: string;
+  readonly guid?: string; // Add guid property
 }
 
 /**

@@ -1,7 +1,7 @@
 import https from 'https';
 import http from 'http';
 import { URL } from 'url';
-import { HttpResponse, HttpRequestOptions } from '../types';
+import { HttpResponse, HttpRequestOptions } from '../types/http';
 
 /**
  * HTTP client with timeout and retry functionality
@@ -21,32 +21,36 @@ export class HttpClient {
    * Perform HTTP GET request with retry logic
    */
   async get(url: string, options: Partial<HttpRequestOptions> = {}): Promise<HttpResponse> {
-    const requestOptions = { ...this.defaultOptions, ...options };
+    const requestOptions: HttpRequestOptions = {
+      ...this.defaultOptions,
+      ...options,
+      method: 'GET',
+    };
     let lastError: Error | null = null;
 
-    for (let attempt = 0; attempt <= requestOptions.retries; attempt++) {
+    for (let attempt = 0; attempt <= requestOptions.retries!; attempt++) {
       try {
-        console.log(`HTTP GET attempt ${attempt + 1}/${requestOptions.retries + 1}: ${url}`);
+        console.log(`HTTP ${requestOptions.method} attempt ${attempt + 1}/${requestOptions.retries! + 1}: ${url}`);
         return await this.performRequest(url, requestOptions);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        console.warn(`HTTP GET attempt ${attempt + 1} failed:`, lastError.message);
+        console.warn(`HTTP ${requestOptions.method} attempt ${attempt + 1} failed:`, lastError.message);
         
         // Don't wait after the last attempt
-        if (attempt < requestOptions.retries) {
+        if (attempt < requestOptions.retries!) {
           const delayMs = process.env.NODE_ENV === 'test' ? 10 : 1000; // Shorter delay in test
           await this.delay(delayMs);
         }
       }
     }
 
-    throw new Error(`HTTP request failed after ${requestOptions.retries + 1} attempts: ${lastError?.message || 'Unknown error'}`);
+    throw new Error(`HTTP request failed after ${requestOptions.retries! + 1} attempts: ${lastError?.message || 'Unknown error'}`);
   }
 
   /**
    * Perform a single HTTP request
    */
-  private async performRequest(url: string, options: HttpRequestOptions): Promise<HttpResponse> {
+  async performRequest(url: string, options: HttpRequestOptions): Promise<HttpResponse> {
     return new Promise((resolve, reject) => {
       const parsedUrl = new URL(url);
       const isHttps = parsedUrl.protocol === 'https:';
@@ -56,12 +60,12 @@ export class HttpClient {
         hostname: parsedUrl.hostname,
         port: parsedUrl.port || (isHttps ? 443 : 80),
         path: parsedUrl.pathname + parsedUrl.search,
-        method: 'GET',
+        method: options.method || 'GET',
         headers: {
           'User-Agent': 'RSS-Discord-Transfer/1.0.0',
           ...options.headers,
         },
-        timeout: options.timeout,
+        timeout: options.timeout!,
       };
 
       const request = client.request(requestOptions, (response) => {
@@ -73,6 +77,13 @@ export class HttpClient {
 
         response.on('end', () => {
           const data = Buffer.concat(chunks).toString('utf-8');
+          const statusCode = response.statusCode || 0;
+
+          if (statusCode < 200 || statusCode >= 300) {
+            reject(new Error(`HTTP error ${statusCode}: ${response.statusMessage}`));
+            return;
+          }
+
           const headers: Record<string, string> = {};
           
           // Convert headers to simple key-value object
@@ -85,21 +96,25 @@ export class HttpClient {
           }
 
           resolve({
-            statusCode: response.statusCode || 0,
+            statusCode: statusCode,
             data,
             headers,
           });
         });
       });
 
-      request.on('error', (error) => {
-        reject(new Error(`Network error: ${error.message}`));
-      });
-
       request.on('timeout', () => {
         request.destroy();
         reject(new Error(`Request timeout after ${options.timeout}ms`));
       });
+
+      request.on('error', (err) => {
+        reject(new Error(`Request failed: ${err.message}`));
+      });
+
+      if (options.body) {
+        request.write(options.body);
+      }
 
       request.end();
     });

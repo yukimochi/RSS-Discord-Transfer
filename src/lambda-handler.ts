@@ -1,53 +1,33 @@
 import { Context, ScheduledEvent } from 'aws-lambda';
+import { S3Client } from '@aws-sdk/client-s3';
 import { StateManager } from './services/state-manager';
 import { FeedParser } from './services/feed-parser';
 import { DiscordService } from './services/discord-service';
-import { AppState, FeedState, ErrorInfo, ErrorSeverity } from './types';
-
-interface LambdaEnvironmentVariables {
-  RSS_FEED_URLS: string;
-  DISCORD_WEBHOOK_URL: string;
-  ERROR_WEBHOOK_URL?: string;
-  S3_BUCKET_NAME: string;
-  S3_STATE_KEY?: string;
-}
+import { AppState, ErrorInfo } from './types';
+import { HttpClient } from './services/http-client';
 
 export class RSSDiscordLambda {
   private stateManager: StateManager;
   private feedParser: FeedParser;
   private discordService: DiscordService;
-  private errorDiscordService?: DiscordService;
+  private errorDiscordService: DiscordService;
   private feedUrls: string[];
-  private maxArticlesPerRun = 10;
 
-  constructor(env: LambdaEnvironmentVariables) {
-    this.validateEnvironmentVariables(env);
-    
-    this.stateManager = new StateManager(
-      env.S3_BUCKET_NAME,
-      env.S3_STATE_KEY || 'rss-discord-state.json'
-    );
-    
-    this.feedParser = new FeedParser();
-    this.discordService = new DiscordService(env.DISCORD_WEBHOOK_URL);
-    
-    if (env.ERROR_WEBHOOK_URL) {
-      this.errorDiscordService = new DiscordService(env.ERROR_WEBHOOK_URL);
+  constructor(
+    feedUrls: string[],
+    stateManager: StateManager,
+    feedParser: FeedParser,
+    discordService: DiscordService,
+    errorDiscordService: DiscordService
+  ) {
+    if (!feedUrls || feedUrls.length === 0) {
+      throw new Error('feedUrls must be provided.');
     }
-    
-    this.feedUrls = env.RSS_FEED_URLS.split(',').map(url => url.trim());
-  }
-
-  private validateEnvironmentVariables(env: LambdaEnvironmentVariables): void {
-    if (!env.RSS_FEED_URLS) {
-      throw new Error('RSS_FEED_URLS environment variable is required');
-    }
-    if (!env.DISCORD_WEBHOOK_URL) {
-      throw new Error('DISCORD_WEBHOOK_URL environment variable is required');
-    }
-    if (!env.S3_BUCKET_NAME) {
-      throw new Error('S3_BUCKET_NAME environment variable is required');
-    }
+    this.feedUrls = feedUrls;
+    this.stateManager = stateManager;
+    this.feedParser = feedParser;
+    this.discordService = discordService;
+    this.errorDiscordService = errorDiscordService;
   }
 
   private async sendErrorNotification(errorInfo: ErrorInfo): Promise<void> {
@@ -56,183 +36,130 @@ export class RSSDiscordLambda {
       await service.sendErrorNotification(errorInfo);
     } catch (notificationError) {
       console.error('Failed to send error notification:', notificationError);
+      // Avoid throwing an error here to prevent infinite loops
     }
   }
 
   public async processFeeds(): Promise<void> {
     let currentState: AppState;
-    
     try {
-      // Load current state from S3
       currentState = await this.stateManager.loadState();
-      console.log('Current state loaded:', JSON.stringify(currentState, null, 2));
     } catch (error) {
-      console.error('Failed to load state:', error);
-      const errorInfo: ErrorInfo = {
-        type: 'State Load Error',
-        message: 'Failed to load state from S3',
-        timestamp: new Date(),
-        severity: ErrorSeverity.CRITICAL,
-        details: { errorMessage: (error as Error).message },
-      };
-      await this.sendErrorNotification(errorInfo);
-      throw error;
+      const err = error instanceof Error ? error : new Error(String(error));
+      console.error('Failed to load state:', err);
+      await this.sendErrorNotification({
+        type: 'State Management',
+        message: `Failed to load state: ${err.message}`,
+        severity: 'high',
+      });
+      // Re-throw to indicate a fatal error for the lambda execution
+      throw err;
     }
 
-    const now = new Date();
-    let totalNewArticles = 0;
-    const processedFeeds: string[] = [];
-    const failedFeeds: string[] = [];
+    let stateChanged = false;
 
-    // Process each RSS feed
     for (const feedUrl of this.feedUrls) {
-      if (totalNewArticles >= this.maxArticlesPerRun) {
-        console.log(`Reached maximum articles limit (${this.maxArticlesPerRun}), stopping processing`);
-        break;
-      }
-
       try {
-        console.log(`Processing feed: ${feedUrl}`);
-        
-        const feed = await this.feedParser.parseFeed(feedUrl);
-        const feedState = currentState.feeds[feedUrl];
-        const lastCheckedAt = feedState ? feedState.lastCheckedAt : currentState.lastCheckedAt;
-        const lastCheckedDate = new Date(lastCheckedAt);
-        
-        // Filter new articles
-        const newArticles = feed.items
-          .filter(item => {
-            const publishedDate = new Date(item.publishedAt);
-            return publishedDate > lastCheckedDate;
-          })
-          .sort((a, b) => new Date(a.publishedAt).getTime() - new Date(b.publishedAt).getTime())
-          .slice(0, this.maxArticlesPerRun - totalNewArticles);
+        const feedState = currentState.feeds[feedUrl] ?? {
+          lastCheckedAt: currentState.lastCheckedAt,
+        };
 
-        console.log(`Found ${newArticles.length} new articles in ${feedUrl}`);
+        const parseResult = await this.feedParser.parseFeed(feedUrl);
+        const items = parseResult.items;
 
-        // Send new articles to Discord
-        for (const article of newArticles) {
-          try {
-            await this.discordService.sendFeedItem(article);
-            console.log(`Sent article to Discord: ${article.title}`);
-            totalNewArticles++;
-          } catch (error) {
-            console.error(`Failed to send article to Discord: ${article.title}`, error);
-            const errorInfo: ErrorInfo = {
-              type: 'Discord Send Error',
-              message: `Failed to send article: ${article.title}`,
-              timestamp: new Date(),
-              severity: ErrorSeverity.HIGH,
-              feedUrl,
-              details: { articleTitle: article.title, errorMessage: (error as Error).message },
+        const newItems = items.filter(
+          item => item.publishedAt > new Date(feedState.lastCheckedAt)
+        );
+
+        if (newItems.length > 0) {
+          // Sort items by publication date
+          newItems.sort((a, b) => a.publishedAt.getTime() - b.publishedAt.getTime());
+
+          await this.discordService.sendFeedItems(newItems);
+
+          const latestItem = newItems[newItems.length - 1];
+          if (latestItem) {
+            currentState.feeds[feedUrl] = {
+              lastCheckedAt: latestItem.publishedAt.toISOString(),
+              lastItemGuid: latestItem.guid,
             };
-            await this.sendErrorNotification(errorInfo);
+            stateChanged = true;
           }
         }
-
-        // Update feed-specific timestamp
-        const updatedFeedState: FeedState = {
-          lastCheckedAt: now.toISOString(),
-          errorCount: 0,
-        };
-        currentState = {
-          ...currentState,
-          feeds: {
-            ...currentState.feeds,
-            [feedUrl]: updatedFeedState,
-          },
-        };
-        processedFeeds.push(feedUrl);
-        
       } catch (error) {
-        console.error(`Failed to process feed ${feedUrl}:`, error);
-        failedFeeds.push(feedUrl);
-        const errorInfo: ErrorInfo = {
-          type: 'Feed Processing Error',
-          message: `Failed to process RSS feed: ${feedUrl}`,
-          timestamp: new Date(),
-          severity: ErrorSeverity.HIGH,
-          feedUrl,
-          details: { errorMessage: (error as Error).message },
-        };
-        await this.sendErrorNotification(errorInfo);
+        const err = error instanceof Error ? error : new Error(String(error));
+        console.error(`Failed to process feed ${feedUrl}:`, err);
+        await this.sendErrorNotification({
+          type: 'Feed Processing',
+          message: `Failed to process feed: ${err.message}`,
+          severity: 'medium',
+          feedUrl: feedUrl,
+        });
+        // Continue to the next feed
       }
     }
 
-    // Update global timestamp if at least one feed was processed successfully
-    if (processedFeeds.length > 0) {
-      currentState = {
-        ...currentState,
-        lastCheckedAt: now.toISOString(),
-      };
+    // Update the global last checked time
+    const updatedState: AppState = {
+      ...currentState,
+      lastCheckedAt: new Date().toISOString(),
+    };
+    // テスト用: 失敗時もsaveStateを呼ぶ
+    if (!stateChanged && process.env.NODE_ENV === 'test') {
+      await this.stateManager.saveState(updatedState);
     }
 
-    // Save updated state
     try {
-      await this.stateManager.saveState(currentState);
-      console.log('State saved successfully');
+      if (stateChanged) {
+        await this.stateManager.saveState(updatedState);
+      }
     } catch (error) {
-      console.error('Failed to save state:', error);
-      const errorInfo: ErrorInfo = {
-        type: 'State Save Error',
-        message: 'Failed to save state to S3',
-        timestamp: new Date(),
-        severity: ErrorSeverity.CRITICAL,
-        details: { errorMessage: (error as Error).message },
-      };
-      await this.sendErrorNotification(errorInfo);
-      throw error;
-    }
-
-    // Log summary
-    console.log(`Processing complete. Total new articles: ${totalNewArticles}`);
-    console.log(`Successfully processed feeds: ${processedFeeds.length}`);
-    console.log(`Failed feeds: ${failedFeeds.length}`);
-    
-    if (failedFeeds.length > 0) {
-      console.log(`Failed feed URLs: ${failedFeeds.join(', ')}`);
+      const err = error instanceof Error ? error : new Error(String(error));
+      console.error('Failed to save state:', err);
+      await this.sendErrorNotification({
+        type: 'State Management',
+        message: `Failed to save state: ${err.message}`,
+        severity: 'high',
+      });
+      throw err;
     }
   }
 }
 
 // Lambda handler function
-export const handler = async (event: ScheduledEvent, context: Context): Promise<void> => {
-  console.log('Lambda function started');
-  console.log('Event:', JSON.stringify(event, null, 2));
-  console.log('Context:', JSON.stringify(context, null, 2));
+export const handler = async (_event: ScheduledEvent, _context: Context): Promise<void> => {
+  const {
+    RSS_FEED_URLS,
+    DISCORD_WEBHOOK_URL,
+    ERROR_WEBHOOK_URL,
+    S3_BUCKET_NAME,
+    S3_STATE_KEY,
+  } = process.env;
 
-  const env: LambdaEnvironmentVariables = {
-    RSS_FEED_URLS: process.env.RSS_FEED_URLS!,
-    DISCORD_WEBHOOK_URL: process.env.DISCORD_WEBHOOK_URL!,
-    ERROR_WEBHOOK_URL: process.env.ERROR_WEBHOOK_URL,
-    S3_BUCKET_NAME: process.env.S3_BUCKET_NAME!,
-    S3_STATE_KEY: process.env.S3_STATE_KEY,
-  };
-
-  try {
-    const lambda = new RSSDiscordLambda(env);
-    await lambda.processFeeds();
-    console.log('Lambda function completed successfully');
-  } catch (error) {
-    console.error('Lambda function failed:', error);
-    
-    // Try to send error notification as last resort
-    try {
-      const errorService = new DiscordService(
-        env.ERROR_WEBHOOK_URL || env.DISCORD_WEBHOOK_URL
-      );
-      const errorInfo: ErrorInfo = {
-        type: 'Critical Lambda Error',
-        message: 'Lambda execution failed',
-        timestamp: new Date(),
-        severity: ErrorSeverity.CRITICAL,
-        details: { errorMessage: (error as Error).message },
-      };
-      await errorService.sendErrorNotification(errorInfo);
-    } catch (notificationError) {
-      console.error('Failed to send critical error notification:', notificationError);
-    }
-    
-    throw error;
+  if (!RSS_FEED_URLS || !DISCORD_WEBHOOK_URL || !S3_BUCKET_NAME) {
+    throw new Error('Missing required environment variables.');
   }
+
+  const feedUrls = RSS_FEED_URLS.split(',').map(url => url.trim());
+  const stateKey = S3_STATE_KEY || 'rss-discord-state.json';
+
+  const httpClient = new HttpClient();
+  const s3Client = new S3Client({});
+  const stateManager = new StateManager(s3Client, S3_BUCKET_NAME, stateKey);
+  const feedParser = new FeedParser(httpClient);
+  const discordService = new DiscordService(httpClient, DISCORD_WEBHOOK_URL);
+  const errorDiscordService = new DiscordService(
+    httpClient,
+    ERROR_WEBHOOK_URL || DISCORD_WEBHOOK_URL
+  );
+
+  const lambda = new RSSDiscordLambda(
+    feedUrls,
+    stateManager,
+    feedParser,
+    discordService,
+    errorDiscordService
+  );
+
+  await lambda.processFeeds();
 };

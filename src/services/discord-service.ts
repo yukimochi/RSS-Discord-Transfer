@@ -1,5 +1,5 @@
 import { HttpClient } from './http-client';
-import { DiscordWebhookPayload, DiscordMessageOptions, ErrorInfo, ErrorSeverity } from '../types';
+import { DiscordWebhookPayload, DiscordMessageOptions, ErrorInfo, DiscordEmbed } from '../types';
 import { FeedItem } from '../types';
 
 /**
@@ -12,11 +12,12 @@ export class DiscordService {
   private readonly messageOptions: DiscordMessageOptions;
 
   constructor(
+    httpClient: HttpClient,
     webhookUrl: string,
     errorWebhookUrl?: string,
     options: Partial<DiscordMessageOptions> = {}
   ) {
-    this.httpClient = new HttpClient({ timeout: 2000 }); // 2 second timeout as per specification
+    this.httpClient = httpClient;
     this.webhookUrl = webhookUrl;
     this.errorWebhookUrl = errorWebhookUrl || webhookUrl;
     this.messageOptions = {
@@ -27,45 +28,59 @@ export class DiscordService {
   }
 
   /**
-   * Send feed item to Discord
+   * Send embeds to Discord, chunking them to respect the 10-embed limit.
    */
-  async sendFeedItem(item: FeedItem): Promise<void> {
-    const content = this.formatFeedItem(item);
-    const payload: DiscordWebhookPayload = {
-      content,
-      username: 'RSS Feed Bot',
-    };
-
-    try {
-      console.log(`Sending feed item to Discord: ${item.title}`);
-      await this.sendWebhook(this.webhookUrl, payload);
-      console.log(`Successfully sent feed item: ${item.title}`);
-    } catch (error) {
-      console.error(`Failed to send feed item to Discord:`, error);
-      throw new Error(`Discord webhook failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  async sendEmbeds(embeds: DiscordEmbed[]): Promise<void> {
+    if (embeds.length === 0) {
+      return;
     }
+
+    const chunks = [];
+    for (let i = 0; i < embeds.length; i += 10) {
+      chunks.push(embeds.slice(i, i + 10));
+    }
+
+    for (const chunk of chunks) {
+      const payload: DiscordWebhookPayload = {
+        embeds: chunk,
+        username: this.messageOptions.username,
+        avatar_url: this.messageOptions.avatar_url,
+      };
+      await this.sendWebhook(this.webhookUrl, payload);
+    }
+  }
+
+  /**
+   * Send a webhook payload to the specified URL.
+   */
+  private async sendWebhook(url: string, payload: DiscordWebhookPayload): Promise<void> {
+    await this.httpClient.performRequest(url, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
   }
 
   /**
    * Send multiple feed items to Discord
    */
   async sendFeedItems(items: FeedItem[]): Promise<void> {
-    const promises = items.map(item => this.sendFeedItem(item));
-    await Promise.all(promises);
+    const embeds = items.map(item => this.createEmbedFromFeedItem(item));
+    await this.sendEmbeds(embeds);
   }
 
   /**
    * Send error notification to Discord
    */
   async sendErrorNotification(errorInfo: ErrorInfo): Promise<void> {
-    const content = this.formatErrorNotification(errorInfo);
-    const payload: DiscordWebhookPayload = {
-      content,
-      username: 'RSS Error Bot',
-    };
+    const embed = this.createEmbedFromErrorInfo(errorInfo);
 
     try {
       console.log(`Sending error notification to Discord: ${errorInfo.type}`);
+      // Use errorWebhookUrl for error notifications
+      const payload: DiscordWebhookPayload = { embeds: [embed] };
       await this.sendWebhook(this.errorWebhookUrl, payload);
       console.log(`Successfully sent error notification: ${errorInfo.type}`);
     } catch (error) {
@@ -74,131 +89,29 @@ export class DiscordService {
     }
   }
 
-  /**
-   * Format feed item for Discord message
-   */
-  private formatFeedItem(item: FeedItem): string {
-    let content = `${item.title}\n${item.link}`;
-
-    if (this.messageOptions.includeTimestamp) {
-      const timestamp = item.publishedAt.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
-      content += `\n投稿日時: ${timestamp}`;
-    }
-
-    // Truncate if too long
-    if (content.length > this.messageOptions.maxContentLength) {
-      const truncateLength = this.messageOptions.maxContentLength - 3; // Reserve space for "..."
-      content = content.substring(0, truncateLength) + '...';
-    }
-
-    return content;
-  }
-
-  /**
-   * Format error notification for Discord message
-   */
-  private formatErrorNotification(errorInfo: ErrorInfo): string {
-    const timestamp = errorInfo.timestamp.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
-    const severityEmoji = this.getSeverityEmoji(errorInfo.severity);
-    
-    let content = `${severityEmoji} **Error Notification**\n`;
-    content += `**Type:** ${errorInfo.type}\n`;
-    content += `**Time:** ${timestamp}\n`;
-    content += `**Message:** ${errorInfo.message}`;
-
-    if (errorInfo.feedUrl) {
-      content += `\n**Feed URL:** ${errorInfo.feedUrl}`;
-    }
-
-    if (errorInfo.details) {
-      const detailsStr = JSON.stringify(errorInfo.details, null, 2);
-      if (detailsStr.length < 500) { // Avoid too long details
-        content += `\n**Details:** \`\`\`json\n${detailsStr}\n\`\`\``;
-      }
-    }
-
-    // Truncate if too long
-    if (content.length > this.messageOptions.maxContentLength) {
-      const truncateLength = this.messageOptions.maxContentLength - 3;
-      content = content.substring(0, truncateLength) + '...';
-    }
-
-    return content;
-  }
-
-  /**
-   * Get emoji for error severity
-   */
-  private getSeverityEmoji(severity: ErrorSeverity): string {
-    switch (severity) {
-      case ErrorSeverity.LOW:
-        return '⚠️';
-      case ErrorSeverity.MEDIUM:
-        return '🔶';
-      case ErrorSeverity.HIGH:
-        return '🔺';
-      case ErrorSeverity.CRITICAL:
-        return '🚨';
-      default:
-        return '❓';
-    }
-  }
-
-  /**
-   * Send webhook payload to Discord
-   */
-  private async sendWebhook(webhookUrl: string, _payload: DiscordWebhookPayload): Promise<void> {
-    if (!this.isValidWebhookUrl(webhookUrl)) {
-      throw new Error(`Invalid Discord webhook URL: ${webhookUrl}`);
-    }
-
-    const response = await this.httpClient.get(webhookUrl, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    // For demonstration, we're doing a GET request to validate the URL
-    // In a real implementation, we would do a POST request with the payload
-    // This is a simplified version for the current HTTP client implementation
-    
-    if (response.statusCode !== 200 && response.statusCode !== 204) {
-      throw new Error(`Discord webhook returned status ${response.statusCode}`);
-    }
-  }
-
-  /**
-   * Validate Discord webhook URL format
-   */
-  private isValidWebhookUrl(url: string): boolean {
-    try {
-      const parsed = new URL(url);
-      return (
-        parsed.hostname === 'discord.com' ||
-        parsed.hostname === 'discordapp.com'
-      ) && parsed.pathname.includes('/webhooks/');
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Create error info object
-   */
-  static createErrorInfo(
-    type: string,
-    message: string,
-    severity: ErrorSeverity,
-    feedUrl?: string,
-    details?: Record<string, unknown>
-  ): ErrorInfo {
-    return {
-      type,
-      message,
-      severity,
-      timestamp: new Date(),
-      feedUrl,
-      details,
+  private createEmbedFromFeedItem(item: FeedItem): DiscordEmbed {
+    const embed: DiscordEmbed = {
+      title: item.title,
+      url: item.link,
+      description: item.content,
+      timestamp: this.messageOptions.includeTimestamp ? item.publishedAt.toISOString() : undefined,
+      color: 0x00ff00, // Green
+      author: item.author ? { name: item.author } : undefined,
     };
+    return embed;
+  }
+
+  private createEmbedFromErrorInfo(errorInfo: ErrorInfo): DiscordEmbed {
+    const embed: DiscordEmbed = {
+      title: `Error: ${errorInfo.type}`,
+      description: errorInfo.message,
+      color: errorInfo.severity === 'high' ? 0xff0000 : 0xffff00, // Red for high, Yellow for medium
+      fields: [
+        { name: 'Feed URL', value: errorInfo.feedUrl || 'N/A', inline: false },
+        { name: 'Severity', value: errorInfo.severity, inline: true },
+        { name: 'Timestamp', value: new Date().toISOString(), inline: true },
+      ],
+    };
+    return embed;
   }
 }

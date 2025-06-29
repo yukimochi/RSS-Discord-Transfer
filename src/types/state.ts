@@ -2,18 +2,16 @@
  * Application state structure stored in S3
  */
 export interface AppState {
-  readonly lastCheckedAt: string; // ISO 8601 string
-  readonly feeds: Record<string, FeedState>;
+  lastCheckedAt: string; // ISO 8601 string
+  feeds: Record<string, FeedState>;
 }
 
 /**
  * Per-feed state information
  */
 export interface FeedState {
-  readonly lastCheckedAt: string; // ISO 8601 string
-  readonly lastProcessedItemId?: string;
-  readonly errorCount: number;
-  readonly lastError?: string;
+  lastCheckedAt: string; // ISO 8601 string
+  lastItemGuid?: string;
 }
 
 /**
